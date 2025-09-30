@@ -259,6 +259,7 @@ class Simulation:
                  chain_steps_p=1,
                  sy_steps_t=1,
                  sy_steps_p=1,
+                 n_bead=1,
                 ):
         '''
             Initialize a Simulation instance.
@@ -283,6 +284,7 @@ class Simulation:
             chain_length: Nose-Hoover thermostat/barostat chain length
             chain_steps: Nose-Hoover thermostat/barostat chain steps
             sy_steps: Nose-Hoover thermostat/barostat number of Suzuki-Yoshida steps (must be 1,3,5,7)
+            n_bead : number of replicas/beads number fo Path-integral MD
             ############################
             Usage:
                 sim = Simulation(...)
@@ -291,7 +293,12 @@ class Simulation:
         initial_position = jnp.array(initial_position) * jnp.ones(1) # Ensure default precision
         self.report_interval = int(report_interval)
         self.log = []
-        self._natoms = initial_position.shape[0]
+        ### MODIFY!!
+        self._n_bead = n_bead
+        if n_bead == 1:
+            self._natoms = initial_position.shape[0]
+        elif n_bead > 1:
+            self._natoms = initial_position.shape[0] #// n_bead     # should divide n_bead?
         self._dt = dt
         self._routine = routine
         self._temperature = temperature
@@ -334,6 +341,12 @@ class Simulation:
                 'chain_length': chain_length_t,
                 'chain_steps': chain_steps_t,
                 'sy_steps': sy_steps_t,
+            }
+        ### MODIFY!!
+        elif self._routine == "NVT-langevin":
+            self._routine_fn = jax_md.simulate.nvt_langevin
+            self._routine_args = {
+                'kT': self._temperature * TEMP_UNIT_CONVERSION,
             }
         elif self._routine == "NPT":
             box33 = jnp.diag(self._initial_box) if self._initial_box.shape == (3,) else self._initial_box
@@ -451,19 +464,44 @@ class Simulation:
             box = jax.lax.with_sharding_constraint(box, sharding)
 
             # Energy calculation
-            E = model.apply(variables,
-                            coord,
-                            box,
-                            self._static_args,
-                            nbrs_nm)[0]
-            if model.params['type'] == 'dplr':
-                wc = wc_model.wc_predict(wc_variables,
-                                         coord,
-                                         box,
-                                         self._static_args,
-                                         nbrs_nm)
-                E = E + p3mlr_fn(jnp.concatenate([coord, wc]),
-                                 jnp.concatenate([qatoms, qwc]))
+            ### MODIFY!!
+            if self._n_bead == 1:
+                E = model.apply(variables,
+                                coord,
+                                box,
+                                self._static_args,
+                                nbrs_nm)[0]
+                if model.params['type'] == 'dplr':
+                    wc = wc_model.wc_predict(wc_variables,
+                                             coord,
+                                             box,
+                                             self._static_args,
+                                             nbrs_nm)
+                    E = E + p3mlr_fn(jnp.concatenate([coord, wc]),
+                                     jnp.concatenate([qatoms, qwc]))
+            elif self._n_bead > 1:
+                coord_reshape = coord.reshape(self._n_bead, self._natoms//self._n_bead, 3)
+                E = jax.vmap(model.apply, in_axes=(None, 0, None, None, None)) \
+                                                (variables,
+                                                coord_reshape,
+                                                box,
+                                                self._static_args,
+                                                nbrs_nm)[0]         # (n_bead, )
+                E = jnp.mean(E)     
+                ### MODIFY!! Add spring energy
+                # freq_spring = sqrt(self._n_bead) / ( \beta * \hbar )
+                # E_spring = 
+                if model.params['type'] == 'dplr':
+                    wc = jax.vmap(wc_model.wc_predict, in_axes=(None, 0, None, None, None)) \
+                                                (wc_variables,
+                                                coord_reshape,
+                                                box,
+                                                self._static_args,
+                                                nbrs_nm)            # (n_bead, n_wc, dimen)
+                    E = E + jnp.mean( jax.vmap(p3mlr_fn, in_axes=(0, None)) \
+                                                    (jnp.concatenate([coord_reshape, wc], axis=1),
+                                                     jnp.concatenate([qatoms, qwc])) )
+
             return E
 
         return energy_fn
