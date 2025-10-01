@@ -361,3 +361,42 @@ def get_mask_by_device(type_count):
     # ensure mask is sharded by device
     sharding = jax.sharding.PositionalSharding(jax.devices())
     return jax.lax.with_sharding_constraint(mask, sharding)
+
+### MODIFY!!
+def normal_mode_transform_fn(n_bead, kT, hbar):
+    """
+        Compute normal mode frequencies and transformation matrix 
+        from primitive cartesian coordinates to normal-mode coordinates for PIMD
+
+        Parameters
+        ----------
+        n_bead : integer -- number of replicas/beads for PIMD
+        kT : float -- temperature, k_B * T
+        hbar : float -- reduced Planck's constant
+
+        Returns
+        -------
+        normal_trans_freq : array of floats -- (n_bead, ), chain frequencies for normal-mode coordinates
+        Eve : array of floats -- (n_bead, n_bead), transformation matrix from primitive cartesian coordinates to normal-mode coordinates
+    """
+    ring_poly_freq = np.sqrt(n_bead) * kT / hbar    # ring-poly frequency for primitive cartesian coordinates
+
+    if n_bead == 1:
+            A = np.eye(n_bead)
+    elif n_bead == 2:
+        A = np.array([[2, -2], [-2, 2]])
+    elif n_bead > 2:
+        A = 2 * np.eye(n_bead) - np.eye(n_bead, k=1) - np.eye(n_bead, k=-1)
+        A[0, n_bead-1] = -1
+        A[n_bead-1, 0] = -1 
+
+    Evao, Eveo = np.linalg.eigh(A)
+    sorted_indices = np.argsort(Evao)
+    Eva = Evao[sorted_indices]
+    if n_bead >=2:
+        Eva[0] = 0
+    Eve = Eveo[:,sorted_indices]    # transformation matrix
+
+    normal_mode_freqs = ring_poly_freq * np.sqrt(Eva)      # frequencies for normal-mode coordinates
+
+    return normal_mode_freqs, Eve

@@ -11,13 +11,14 @@ from time import time
 from ase import io, Atoms
 
 from .data import compute_lattice_candidate
-from .utils import split, concat, load_model, norm_ortho_box, get_p3mlr_fn, get_p3mlr_grid_size
+from .utils import split, concat, load_model, norm_ortho_box, get_p3mlr_fn, get_p3mlr_grid_size, normal_mode_transform_fn
 from typing import Callable
 from functools import partial
 
 MASS_UNIT_CONVERSION = 1.036427e2 # from Dalton to eV * fs^2 / Å^2
 TEMP_UNIT_CONVERSION = 8.617333e-5 # from Kelvin to eV
 PRESS_UNIT_CONVERSION = 6.241509e-7 # from bar to eV / Å^3
+HBAR = 6.582119569e-16  # reduced Planck's constant, eV * s
 
 def reorder_by_device(coord, type_count):
     '''
@@ -299,6 +300,7 @@ class Simulation:
             self._natoms = initial_position.shape[0]
         elif n_bead > 1:
             self._natoms = initial_position.shape[0] #// n_bead     # should divide n_bead?
+            self._nm_freqs, self._nm_trans = normal_mode_transform_fn(n_bead, temperature * TEMP_UNIT_CONVERSION, HBAR)
         self._dt = dt
         self._routine = routine
         self._temperature = temperature
@@ -489,8 +491,9 @@ class Simulation:
                                                 nbrs_nm)[0]         # (n_bead, )
                 E = jnp.mean(E)     
                 ### MODIFY!! Add spring energy
-                # freq_spring = sqrt(self._n_bead) / ( \beta * \hbar )
-                # E_spring = 
+                nm_coord_reshape = jnp.tensordot(self._nm_trans, coord_reshape, axes=(1, 0))   # (n_bead, n_atoms, dimen)
+                E = E + 0.5 * jnp.sum(self._mass.reshape(self._n_bead, -1)[:, :, None] * self._nm_freqs[:, None, None]**2 * nm_coord_reshape**2)
+
                 if model.params['type'] == 'dplr':
                     wc = jax.vmap(wc_model.wc_predict, in_axes=(None, 0, None, None, None)) \
                                                 (wc_variables,
