@@ -491,7 +491,7 @@ class Simulation:
                                                 nbrs_nm)[0]         # (n_bead, )
                 E = jnp.mean(E)     
                 ### MODIFY!! Add spring energy
-                nm_coord_reshape = jnp.tensordot(self._nm_trans, coord_reshape, axes=(1, 0))   # (n_bead, n_atoms, dimen)
+                nm_coord_reshape = jnp.tensordot(self._nm_trans.T, coord_reshape, axes=(1, 0))   # (n_bead, n_atoms, dimen)
                 E = E + 0.5 * jnp.sum(self._mass.reshape(self._n_bead, -1)[:, :, None] * self._nm_freqs[:, None, None]**2 * nm_coord_reshape**2)
 
                 if model.params['type'] == 'dplr':
