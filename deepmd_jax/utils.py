@@ -379,7 +379,7 @@ def normal_mode_transform_fn(n_bead, kT, hbar):
         normal_mode_freqs : array of floats -- (n_bead, ), chain frequencies for normal-mode coordinates in the unit of [fs^{-1}]
         Eve : array of floats -- (n_bead, n_bead), transformation matrix from normal-mode coordinates to primitive cartesian coordinates
     """
-    ring_poly_freq = np.sqrt(n_bead) * kT / hbar    # ring-poly frequency for primitive cartesian coordinates
+    ring_poly_freq = n_bead * kT / hbar    # ring-poly frequency for primitive cartesian coordinates
 
     A = 2 * np.eye(n_bead) - np.roll(np.eye(n_bead), 1, axis=0) - np.roll(np.eye(n_bead), -1, axis=0)
 
