@@ -376,19 +376,12 @@ def normal_mode_transform_fn(n_bead, kT, hbar):
 
         Returns
         -------
-        normal_mode_freqs : array of floats -- (n_bead, ), chain frequencies for normal-mode coordinates
+        normal_mode_freqs : array of floats -- (n_bead, ), chain frequencies for normal-mode coordinates in the unit of [fs^{-1}]
         Eve : array of floats -- (n_bead, n_bead), transformation matrix from normal-mode coordinates to primitive cartesian coordinates
     """
     ring_poly_freq = np.sqrt(n_bead) * kT / hbar    # ring-poly frequency for primitive cartesian coordinates
 
-    if n_bead == 1:
-        A = np.eye(n_bead)
-    elif n_bead == 2:
-        A = np.array([[2, -2], [-2, 2]])
-    elif n_bead > 2:
-        A = 2 * np.eye(n_bead) - np.eye(n_bead, k=1) - np.eye(n_bead, k=-1)
-        A[0, n_bead-1] = -1
-        A[n_bead-1, 0] = -1 
+    A = 2 * np.eye(n_bead) - np.roll(np.eye(n_bead), 1, axis=0) - np.roll(np.eye(n_bead), -1, axis=0)
 
     Evao, Eveo = np.linalg.eigh(A)
     sorted_indices = np.argsort(Evao)

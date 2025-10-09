@@ -18,7 +18,7 @@ from functools import partial
 MASS_UNIT_CONVERSION = 1.036427e2 # from Dalton to eV * fs^2 / Å^2
 TEMP_UNIT_CONVERSION = 8.617333e-5 # from Kelvin to eV
 PRESS_UNIT_CONVERSION = 6.241509e-7 # from bar to eV / Å^3
-HBAR = 6.582119569e-16  # reduced Planck's constant, eV * s
+HBAR = 6.582119569e-16 * 1E15  # reduced Planck's constant, eV * fs
 
 def reorder_by_device(coord, type_count):
     '''
@@ -299,7 +299,7 @@ class Simulation:
         if n_bead == 1:
             self._natoms = initial_position.shape[0]
         elif n_bead > 1:
-            self._natoms = initial_position.shape[0] #// n_bead     # should divide n_bead?
+            self._natoms = initial_position.shape[1]    # For PIMD, initial_position.shape = (n_bead, n_atom, dimen)
             self._nm_freqs, self._nm_trans = normal_mode_transform_fn(n_bead, temperature * TEMP_UNIT_CONVERSION, HBAR)
         self._dt = dt
         self._routine = routine
@@ -345,7 +345,7 @@ class Simulation:
                 'sy_steps': sy_steps_t,
             }
         ### MODIFY!!
-        elif self._routine == "NVT-langevin":
+        elif self._routine == "NVT_langevin":
             self._routine_fn = jax_md.simulate.nvt_langevin
             self._routine_args = {
                 'kT': self._temperature * TEMP_UNIT_CONVERSION,
@@ -466,7 +466,6 @@ class Simulation:
             box = jax.lax.with_sharding_constraint(box, sharding)
 
             # Energy calculation
-            ### MODIFY!!
             if self._n_bead == 1:
                 E = model.apply(variables,
                                 coord,
@@ -482,7 +481,8 @@ class Simulation:
                     E = E + p3mlr_fn(jnp.concatenate([coord, wc]),
                                      jnp.concatenate([qatoms, qwc]))
             elif self._n_bead > 1:
-                coord_reshape = coord.reshape(self._n_bead, self._natoms//self._n_bead, 3)
+                ### MODIFY!!
+                coord_reshape = coord   # coord.reshape(self._n_bead, self._natoms//self._n_bead, 3)
                 E = jax.vmap(model.apply, in_axes=(None, 0, None, None, None)) \
                                                 (variables,
                                                 coord_reshape,
@@ -492,7 +492,7 @@ class Simulation:
                 E = jnp.mean(E)     
                 ### MODIFY!! Add spring energy
                 nm_coord_reshape = jnp.tensordot(self._nm_trans.T, coord_reshape, axes=(1, 0))   # (n_bead, n_atoms, dimen)
-                E = E + 0.5 * jnp.sum(self._mass.reshape(self._n_bead, -1)[:, :, None] * self._nm_freqs[:, None, None]**2 * nm_coord_reshape**2)
+                E = E + 0.5 * jnp.sum((self._mass * MASS_UNIT_CONVERSION)[None, :, None] * self._nm_freqs[:, None, None]**2 * nm_coord_reshape**2)
 
                 if model.params['type'] == 'dplr':
                     wc = jax.vmap(wc_model.wc_predict, in_axes=(None, 0, None, None, None)) \
